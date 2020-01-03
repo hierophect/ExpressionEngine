@@ -147,83 +147,6 @@ void setup(void) {
   }
   Serial.println("done");
 
-// #if defined(LOGO_TOP_WIDTH) || defined(COLOR_LOGO_WIDTH)
-//   Serial.println("Display logo");
-//   // I noticed lots of folks getting right/left eyes flipped, or
-//   // installing upside-down, etc.  Logo split across screens may help:
-//   for(e=0; e<NUM_EYES; e++) { // Another pass, after all screen inits
-//     eye[e].display->fillScreen(0);
-//     #ifdef LOGO_TOP_WIDTH
-//       // Monochrome Adafruit logo is 2 mono bitmaps:
-//       eye[e].display->drawBitmap(NUM_EYES*64 - e*128 - 20,
-//         0, logo_top, LOGO_TOP_WIDTH, LOGO_TOP_HEIGHT, 0xFFFF);
-//       eye[e].display->drawBitmap(NUM_EYES*64 - e*128 - LOGO_BOTTOM_WIDTH/2,
-//         LOGO_TOP_HEIGHT, logo_bottom, LOGO_BOTTOM_WIDTH, LOGO_BOTTOM_HEIGHT,
-//         0xFFFF);
-//     #else
-//       // Color sponsor logo is one RGB bitmap:
-//       eye[e].display->fillScreen(color_logo[0]);
-//       eye[0].display->drawRGBBitmap(
-//         (eye[e].display->width()  - COLOR_LOGO_WIDTH ) / 2,
-//         (eye[e].display->height() - COLOR_LOGO_HEIGHT) / 2,
-//         color_logo, COLOR_LOGO_WIDTH, COLOR_LOGO_HEIGHT);
-//     #endif
-//     // After logo is drawn
-//   }
-//   #ifdef DISPLAY_BACKLIGHT
-//     int i;
-//     Serial.println("Fade in backlight");
-//     for(i=0; i<BACKLIGHT_MAX; i++) { // Fade logo in
-//       analogWrite(DISPLAY_BACKLIGHT, i);
-//       delay(2);
-//     }
-//     delay(1400); // Pause for screen layout/orientation
-//     Serial.println("Fade out backlight");
-//     for(; i>=0; i--) {
-//       analogWrite(DISPLAY_BACKLIGHT, i);
-//       delay(2);
-//     }
-//     for(e=0; e<NUM_EYES; e++) { // Clear display(s)
-//       eye[e].display->fillScreen(0);
-//     }
-//     delay(100);
-//   #else
-//     delay(2000); // Pause for screen layout/orientation
-//   #endif // DISPLAY_BACKLIGHT
-// #endif // LOGO_TOP_WIDTH
-
-  // One of the displays is configured to mirror on the X axis.  Simplifies
-  // eyelid handling in the drawEye() function -- no need for distinct
-  // L-to-R or R-to-L inner loops.  Just the X coordinate of the iris is
-  // then reversed when drawing this eye, so they move the same.  Magic!
-#if defined(SYNCPIN) && (SYNCPIN >= 0)
-  if(receiver) {
-#endif
-#if defined(_ADAFRUIT_ST7735H_) || defined(_ADAFRUIT_ST77XXH_) // TFT
-    const uint8_t mirrorTFT[]  = { 0x88, 0x28, 0x48, 0xE8 }; // Mirror+rotate
-    eye[0].display->sendCommand(
-    #ifdef ST77XX_MADCTL
-      ST77XX_MADCTL, // Current TFT lib
-    #else
-      ST7735_MADCTL, // Older TFT lib
-    #endif
-      &mirrorTFT[eyeInfo[0].rotation & 3], 1);
-  #else // OLED
-    const uint8_t rotateOLED[] = { 0x74, 0x77, 0x66, 0x65 },
-                  mirrorOLED[] = { 0x76, 0x67, 0x64, 0x75 }; // Mirror+rotate
-    // If OLED, loop through ALL eyes and set up remap register
-    // from either mirrorOLED[] (first eye) or rotateOLED[] (others).
-    // The OLED library doesn't normally use the remap reg (TFT does).
-    for(e=0; e<NUM_EYES; e++) {
-      eye[e].display->sendCommand(SSD1351_CMD_SETREMAP, e ?
-        &rotateOLED[eyeInfo[e].rotation & 3] :
-        &mirrorOLED[eyeInfo[e].rotation & 3], 1);
-    }
-#endif
-#if defined(SYNCPIN) && (SYNCPIN >= 0)
-  } // Don't mirror receiver screen
-#endif
-
 #ifdef DISPLAY_BACKLIGHT
   Serial.println("Backlight on!");
   analogWrite(DISPLAY_BACKLIGHT, BACKLIGHT_MAX);
@@ -239,44 +162,16 @@ SPISettings settings(SPI_FREQ, MSBFIRST, SPI_MODE0);
 
 void drawEye( // Renders one eye.  Inputs must be pre-clipped & valid.
   uint8_t  e,       // Eye array index; 0 or 1 for left/right
-  uint16_t iScale,  // Scale factor for iris (0-1023)
-  uint8_t  scleraX, // First pixel X offset into sclera image
-  uint8_t  scleraY, // First pixel Y offset into sclera image
-  uint8_t  uT,      // Upper eyelid threshold value
-  uint8_t  lT) {    // Lower eyelid threshold value
+  uint8_t  orbX, // First pixel X offset into sclera image
+  uint8_t  orbY, // First pixel Y offset into sclera image
+  uint8_t cubeX,
+  uint8_t cubeY,
+  uint16_t cubeR) {
 
   uint8_t  screenX, screenY, scleraXsave;
   int16_t  irisX, irisY;
   uint16_t p, a;
   uint32_t d;
-
-#if defined(SYNCPIN) && (SYNCPIN >= 0)
-  if(receiver) {
-    // Overwrite arguments with values in syncStruct.  Disable interrupts
-    // briefly so new data can't overwrite the struct in mid-parse.
-    noInterrupts();
-    iScale  = syncStruct.iScale;
-    // Screen is mirrored, this 'de-mirrors' the eye X direction
-    scleraX = SCLERA_WIDTH - 1 - SCREEN_WIDTH - syncStruct.scleraX;
-    scleraY = syncStruct.scleraY;
-    uT      = syncStruct.uT;
-    lT      = syncStruct.lT;
-    interrupts();
-  } else {
-    // Stuff arguments into syncStruct and send to receiver
-    syncStruct.iScale  = iScale;
-    syncStruct.scleraX = scleraX;
-    syncStruct.scleraY = scleraY;
-    syncStruct.uT      = uT;
-    syncStruct.lT      = lT;
-    Wire.beginTransmission(SYNCADDR);
-    Wire.write((char *)&syncStruct, sizeof syncStruct);
-    Wire.endTransmission();
-  }
-#endif
-
-  uint8_t  irisThreshold = (128 * (1023 - iScale) + 512) / 1024;
-  uint32_t irisScale     = IRIS_MAP_HEIGHT * 65536 / irisThreshold;
 
   // Set up raw pixel dump to entire screen.  Although such writes can wrap
   // around automatically from end of rect back to beginning, the region is
