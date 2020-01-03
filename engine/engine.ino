@@ -147,50 +147,50 @@ void setup(void) {
   }
   Serial.println("done");
 
-#if defined(LOGO_TOP_WIDTH) || defined(COLOR_LOGO_WIDTH)
-  Serial.println("Display logo");
-  // I noticed lots of folks getting right/left eyes flipped, or
-  // installing upside-down, etc.  Logo split across screens may help:
-  for(e=0; e<NUM_EYES; e++) { // Another pass, after all screen inits
-    eye[e].display->fillScreen(0);
-    #ifdef LOGO_TOP_WIDTH
-      // Monochrome Adafruit logo is 2 mono bitmaps:
-      eye[e].display->drawBitmap(NUM_EYES*64 - e*128 - 20,
-        0, logo_top, LOGO_TOP_WIDTH, LOGO_TOP_HEIGHT, 0xFFFF);
-      eye[e].display->drawBitmap(NUM_EYES*64 - e*128 - LOGO_BOTTOM_WIDTH/2,
-        LOGO_TOP_HEIGHT, logo_bottom, LOGO_BOTTOM_WIDTH, LOGO_BOTTOM_HEIGHT,
-        0xFFFF);
-    #else
-      // Color sponsor logo is one RGB bitmap:
-      eye[e].display->fillScreen(color_logo[0]);
-      eye[0].display->drawRGBBitmap(
-        (eye[e].display->width()  - COLOR_LOGO_WIDTH ) / 2,
-        (eye[e].display->height() - COLOR_LOGO_HEIGHT) / 2,
-        color_logo, COLOR_LOGO_WIDTH, COLOR_LOGO_HEIGHT);
-    #endif
-    // After logo is drawn
-  }
-  #ifdef DISPLAY_BACKLIGHT
-    int i;
-    Serial.println("Fade in backlight");
-    for(i=0; i<BACKLIGHT_MAX; i++) { // Fade logo in
-      analogWrite(DISPLAY_BACKLIGHT, i);
-      delay(2);
-    }
-    delay(1400); // Pause for screen layout/orientation
-    Serial.println("Fade out backlight");
-    for(; i>=0; i--) {
-      analogWrite(DISPLAY_BACKLIGHT, i);
-      delay(2);
-    }
-    for(e=0; e<NUM_EYES; e++) { // Clear display(s)
-      eye[e].display->fillScreen(0);
-    }
-    delay(100);
-  #else
-    delay(2000); // Pause for screen layout/orientation
-  #endif // DISPLAY_BACKLIGHT
-#endif // LOGO_TOP_WIDTH
+// #if defined(LOGO_TOP_WIDTH) || defined(COLOR_LOGO_WIDTH)
+//   Serial.println("Display logo");
+//   // I noticed lots of folks getting right/left eyes flipped, or
+//   // installing upside-down, etc.  Logo split across screens may help:
+//   for(e=0; e<NUM_EYES; e++) { // Another pass, after all screen inits
+//     eye[e].display->fillScreen(0);
+//     #ifdef LOGO_TOP_WIDTH
+//       // Monochrome Adafruit logo is 2 mono bitmaps:
+//       eye[e].display->drawBitmap(NUM_EYES*64 - e*128 - 20,
+//         0, logo_top, LOGO_TOP_WIDTH, LOGO_TOP_HEIGHT, 0xFFFF);
+//       eye[e].display->drawBitmap(NUM_EYES*64 - e*128 - LOGO_BOTTOM_WIDTH/2,
+//         LOGO_TOP_HEIGHT, logo_bottom, LOGO_BOTTOM_WIDTH, LOGO_BOTTOM_HEIGHT,
+//         0xFFFF);
+//     #else
+//       // Color sponsor logo is one RGB bitmap:
+//       eye[e].display->fillScreen(color_logo[0]);
+//       eye[0].display->drawRGBBitmap(
+//         (eye[e].display->width()  - COLOR_LOGO_WIDTH ) / 2,
+//         (eye[e].display->height() - COLOR_LOGO_HEIGHT) / 2,
+//         color_logo, COLOR_LOGO_WIDTH, COLOR_LOGO_HEIGHT);
+//     #endif
+//     // After logo is drawn
+//   }
+//   #ifdef DISPLAY_BACKLIGHT
+//     int i;
+//     Serial.println("Fade in backlight");
+//     for(i=0; i<BACKLIGHT_MAX; i++) { // Fade logo in
+//       analogWrite(DISPLAY_BACKLIGHT, i);
+//       delay(2);
+//     }
+//     delay(1400); // Pause for screen layout/orientation
+//     Serial.println("Fade out backlight");
+//     for(; i>=0; i--) {
+//       analogWrite(DISPLAY_BACKLIGHT, i);
+//       delay(2);
+//     }
+//     for(e=0; e<NUM_EYES; e++) { // Clear display(s)
+//       eye[e].display->fillScreen(0);
+//     }
+//     delay(100);
+//   #else
+//     delay(2000); // Pause for screen layout/orientation
+//   #endif // DISPLAY_BACKLIGHT
+// #endif // LOGO_TOP_WIDTH
 
   // One of the displays is configured to mirror on the X axis.  Simplifies
   // eyelid handling in the drawEye() function -- no need for distinct
