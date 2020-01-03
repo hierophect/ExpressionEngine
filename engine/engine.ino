@@ -1,20 +1,7 @@
 //--------------------------------------------------------------------------
-// Uncanny eyes for Adafruit 1.5" OLED (product #1431) or 1.44" TFT LCD
-// (#2088).  Works on PJRC Teensy 3.x and on Adafruit M0 and M4 boards
-// (Feather, Metro, etc.).  This code uses features specific to these
-// boards and WILL NOT work on normal Arduino or other boards!
-//
-// SEE FILE "config.h" FOR MOST CONFIGURATION (graphics, pins, display type,
-// etc).  Probably won't need to edit THIS file unless you're doing some
-// extremely custom modifications.
-//
-// Adafruit invests time and resources providing this open source code,
-// please support Adafruit and open-source hardware by purchasing products
-// from Adafruit!
-//
-// Written by Phil Burgess / Paint Your Dragon for Adafruit Industries.
-// MIT license.  SPI FIFO insight from Paul Stoffregen's ILI9341_t3 library.
-// Inspired by David Boccabella's (Marcwolf) hybrid servo/OLED eye concept.
+// Expression Engine - shape based expressions for interactive Robots
+// Copyright (c) Hierophect 2019
+// Inspired by the Uncanny Eyes project by Phil Burgess for Adafruit Industries
 //--------------------------------------------------------------------------
 
 #include <SPI.h>
