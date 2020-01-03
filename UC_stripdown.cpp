@@ -54,77 +54,25 @@ struct {                // One-per-eye structure
   eyeBlink     blink;   // Current blink/wink state
 } eye[NUM_EYES];
 
-#ifdef ARDUINO_ARCH_SAMD
-  // SAMD boards use DMA (Teensy uses SPI FIFO instead):
-  // Two single-line 128-pixel buffers (16bpp) are used for DMA.
-  // Though you'd think fewer larger transfers would improve speed,
-  // multi-line buffering made no appreciable difference.
-  uint16_t          dmaBuf[2][128];
-  uint8_t           dmaIdx = 0; // Active DMA buffer # (alternate fill/send)
-  Adafruit_ZeroDMA  dma;
-  DmacDescriptor   *descriptor;
-
-  // DMA transfer-in-progress indicator and callback
-  static volatile bool dma_busy = false;
-  static void dma_callback(Adafruit_ZeroDMA *dma) { dma_busy = false; }
-#endif
+//ST: dma buffer variables
 
 uint32_t startTime;  // For FPS indicator
 
-#if defined(SYNCPIN) && (SYNCPIN >= 0)
-#include <Wire.h>
-// If two boards are synchronized over I2C, this struct is passed from one
-// to other. No device-independent packing & unpacking is performed...both
-// boards are expected to be the same architecture & endianism.
-struct {
-  uint16_t iScale;  // These are basically the same arguments as
-  uint8_t  scleraX; // drawEye() expects, explained in that function.
-  uint8_t  scleraY;
-  uint8_t  uT;
-  uint8_t  lT;
-} syncStruct = { 512,
-  (SCLERA_WIDTH-SCREEN_WIDTH)/2, (SCLERA_HEIGHT-SCREEN_HEIGHT)/2, 0, 0 };
-
-void wireCallback(int n) {
-  if(n == sizeof syncStruct) {
-    // Read 'n' bytes from I2C into syncStruct
-    uint8_t *ptr = (uint8_t *)&syncStruct;
-    for(uint8_t i=0; i < sizeof syncStruct; i++) {
-      ptr[i] = Wire.read();
-    }
-  }
-}
-
-bool receiver = false;
-#endif // SYNCPIN
+//ST sync struct and callback
 
 // INITIALIZATION -- runs once at startup ----------------------------------
 
 void setup(void) {
   uint8_t e; // Eye index, 0 to NUM_EYES-1
 
-#if defined(SYNCPIN) && (SYNCPIN >= 0) // If using I2C sync...
-  pinMode(SYNCPIN, INPUT_PULLUP);      // Check for jumper to ground
-  if(!digitalRead(SYNCPIN)) {          // If there...
-    receiver = true;                   // Set this one up as receiver
-    Wire.begin(SYNCADDR);
-    Wire.onReceive(wireCallback);
-  } else {
-    Wire.begin();                      // Else set up as sender
-  }
-#endif
+//ST sync set as reciever or sender
 
   Serial.begin(115200);
   //while (!Serial);
   Serial.println("Init");
   randomSeed(analogRead(A3)); // Seed random() from floating analog input
 
-#ifdef DISPLAY_BACKLIGHT
-  // Enable backlight pin, initially off
-  Serial.println("Backlight off");
-  pinMode(DISPLAY_BACKLIGHT, OUTPUT);
-  digitalWrite(DISPLAY_BACKLIGHT, LOW);
-#endif
+//ST turn off backlight
 
   // Initialize eye objects based on eyeInfo list in config.h:
   for(e=0; e<NUM_EYES; e++) {
@@ -178,131 +126,11 @@ void setup(void) {
   }
   Serial.println("done");
 
-#if defined(LOGO_TOP_WIDTH) || defined(COLOR_LOGO_WIDTH)
-  Serial.println("Display logo");
-  // I noticed lots of folks getting right/left eyes flipped, or
-  // installing upside-down, etc.  Logo split across screens may help:
-  for(e=0; e<NUM_EYES; e++) { // Another pass, after all screen inits
-    eye[e].display->fillScreen(0);
-    #ifdef LOGO_TOP_WIDTH
-      // Monochrome Adafruit logo is 2 mono bitmaps:
-      eye[e].display->drawBitmap(NUM_EYES*64 - e*128 - 20,
-        0, logo_top, LOGO_TOP_WIDTH, LOGO_TOP_HEIGHT, 0xFFFF);
-      eye[e].display->drawBitmap(NUM_EYES*64 - e*128 - LOGO_BOTTOM_WIDTH/2,
-        LOGO_TOP_HEIGHT, logo_bottom, LOGO_BOTTOM_WIDTH, LOGO_BOTTOM_HEIGHT,
-        0xFFFF);
-    #else
-      // Color sponsor logo is one RGB bitmap:
-      eye[e].display->fillScreen(color_logo[0]);
-      eye[0].display->drawRGBBitmap(
-        (eye[e].display->width()  - COLOR_LOGO_WIDTH ) / 2,
-        (eye[e].display->height() - COLOR_LOGO_HEIGHT) / 2,
-        color_logo, COLOR_LOGO_WIDTH, COLOR_LOGO_HEIGHT);
-    #endif
-    // After logo is drawn
-  }
-  #ifdef DISPLAY_BACKLIGHT
-    int i;
-    Serial.println("Fade in backlight");
-    for(i=0; i<BACKLIGHT_MAX; i++) { // Fade logo in
-      analogWrite(DISPLAY_BACKLIGHT, i);
-      delay(2);
-    }
-    delay(1400); // Pause for screen layout/orientation
-    Serial.println("Fade out backlight");
-    for(; i>=0; i--) {
-      analogWrite(DISPLAY_BACKLIGHT, i);
-      delay(2);
-    }
-    for(e=0; e<NUM_EYES; e++) { // Clear display(s)
-      eye[e].display->fillScreen(0);
-    }
-    delay(100);
-  #else
-    delay(2000); // Pause for screen layout/orientation
-  #endif // DISPLAY_BACKLIGHT
-#endif // LOGO_TOP_WIDTH
+//ST display the logo
 
-  // One of the displays is configured to mirror on the X axis.  Simplifies
-  // eyelid handling in the drawEye() function -- no need for distinct
-  // L-to-R or R-to-L inner loops.  Just the X coordinate of the iris is
-  // then reversed when drawing this eye, so they move the same.  Magic!
-#if defined(SYNCPIN) && (SYNCPIN >= 0)
-  if(receiver) {
-#endif
-#if defined(_ADAFRUIT_ST7735H_) || defined(_ADAFRUIT_ST77XXH_) // TFT
-    const uint8_t mirrorTFT[]  = { 0x88, 0x28, 0x48, 0xE8 }; // Mirror+rotate
-    eye[0].display->sendCommand(
-    #ifdef ST77XX_MADCTL
-      ST77XX_MADCTL, // Current TFT lib
-    #else
-      ST7735_MADCTL, // Older TFT lib
-    #endif
-      &mirrorTFT[eyeInfo[0].rotation & 3], 1);
-  #else // OLED
-    const uint8_t rotateOLED[] = { 0x74, 0x77, 0x66, 0x65 },
-                  mirrorOLED[] = { 0x76, 0x67, 0x64, 0x75 }; // Mirror+rotate
-    // If OLED, loop through ALL eyes and set up remap register
-    // from either mirrorOLED[] (first eye) or rotateOLED[] (others).
-    // The OLED library doesn't normally use the remap reg (TFT does).
-    for(e=0; e<NUM_EYES; e++) {
-      eye[e].display->sendCommand(SSD1351_CMD_SETREMAP, e ?
-        &rotateOLED[eyeInfo[e].rotation & 3] :
-        &mirrorOLED[eyeInfo[e].rotation & 3], 1);
-    }
-#endif
-#if defined(SYNCPIN) && (SYNCPIN >= 0)
-  } // Don't mirror receiver screen
-#endif
+//ST mirror the display
 
-#ifdef ARDUINO_ARCH_SAMD
-  // Set up SPI DMA on SAMD boards:
-  int                dmac_id;
-  volatile uint32_t *data_reg;
-  if(&TFT_PERIPH == &sercom0) {
-    dmac_id  = SERCOM0_DMAC_ID_TX;
-    data_reg = &SERCOM0->SPI.DATA.reg;
-#if defined SERCOM1
-  } else if(&TFT_PERIPH == &sercom1) {
-    dmac_id  = SERCOM1_DMAC_ID_TX;
-    data_reg = &SERCOM1->SPI.DATA.reg;
-#endif
-#if defined SERCOM2
-  } else if(&TFT_PERIPH == &sercom2) {
-    dmac_id  = SERCOM2_DMAC_ID_TX;
-    data_reg = &SERCOM2->SPI.DATA.reg;
-#endif
-#if defined SERCOM3
-  } else if(&TFT_PERIPH == &sercom3) {
-    dmac_id  = SERCOM3_DMAC_ID_TX;
-    data_reg = &SERCOM3->SPI.DATA.reg;
-#endif
-#if defined SERCOM4
-  } else if(&TFT_PERIPH == &sercom4) {
-    dmac_id  = SERCOM4_DMAC_ID_TX;
-    data_reg = &SERCOM4->SPI.DATA.reg;
-#endif
-#if defined SERCOM5
-  } else if(&TFT_PERIPH == &sercom5) {
-    dmac_id  = SERCOM5_DMAC_ID_TX;
-    data_reg = &SERCOM5->SPI.DATA.reg;
-#endif
-  }
-
-  Serial.println("DMA init");
-  dma.allocate();
-  dma.setTrigger(dmac_id);
-  dma.setAction(DMA_TRIGGER_ACTON_BEAT);
-  descriptor = dma.addDescriptor(
-    NULL,               // move data
-    (void *)data_reg,   // to here
-    sizeof dmaBuf[0],   // this many...
-    DMA_BEAT_SIZE_BYTE, // bytes/hword/words
-    true,               // increment source addr?
-    false);             // increment dest addr?
-  dma.setCallback(dma_callback);
-
-#endif // End SAMD-specific SPI DMA init
+//ST set up DMA
 
 #ifdef DISPLAY_BACKLIGHT
   Serial.println("Backlight on!");
@@ -330,30 +158,7 @@ void drawEye( // Renders one eye.  Inputs must be pre-clipped & valid.
   uint16_t p, a;
   uint32_t d;
 
-#if defined(SYNCPIN) && (SYNCPIN >= 0)
-  if(receiver) {
-    // Overwrite arguments with values in syncStruct.  Disable interrupts
-    // briefly so new data can't overwrite the struct in mid-parse.
-    noInterrupts();
-    iScale  = syncStruct.iScale;
-    // Screen is mirrored, this 'de-mirrors' the eye X direction
-    scleraX = SCLERA_WIDTH - 1 - SCREEN_WIDTH - syncStruct.scleraX;
-    scleraY = syncStruct.scleraY;
-    uT      = syncStruct.uT;
-    lT      = syncStruct.lT;
-    interrupts();
-  } else {
-    // Stuff arguments into syncStruct and send to receiver
-    syncStruct.iScale  = iScale;
-    syncStruct.scleraX = scleraX;
-    syncStruct.scleraY = scleraY;
-    syncStruct.uT      = uT;
-    syncStruct.lT      = lT;
-    Wire.beginTransmission(SYNCADDR);
-    Wire.write((char *)&syncStruct, sizeof syncStruct);
-    Wire.endTransmission();
-  }
-#endif
+//ST sync Overwrite values with syncstruct ones in a critical period
 
   uint8_t  irisThreshold = (128 * (1023 - iScale) + 512) / 1024;
   uint32_t irisScale     = IRIS_MAP_HEIGHT * 65536 / irisThreshold;
