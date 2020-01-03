@@ -6,9 +6,6 @@
 
 #include <SPI.h>
 #include <Adafruit_GFX.h>
-#ifdef ARDUINO_ARCH_SAMD
-  #include <Adafruit_ZeroDMA.h>
-#endif
 
 typedef struct {        // Struct is defined before including config.h --
   int8_t  select;       // pin numbers for each eye's screen select line
@@ -40,21 +37,6 @@ struct {                // One-per-eye structure
   displayType *display; // -> OLED/TFT object
   eyeBlink     blink;   // Current blink/wink state
 } eye[NUM_EYES];
-
-#ifdef ARDUINO_ARCH_SAMD
-  // SAMD boards use DMA (Teensy uses SPI FIFO instead):
-  // Two single-line 128-pixel buffers (16bpp) are used for DMA.
-  // Though you'd think fewer larger transfers would improve speed,
-  // multi-line buffering made no appreciable difference.
-  uint16_t          dmaBuf[2][128];
-  uint8_t           dmaIdx = 0; // Active DMA buffer # (alternate fill/send)
-  Adafruit_ZeroDMA  dma;
-  DmacDescriptor   *descriptor;
-
-  // DMA transfer-in-progress indicator and callback
-  static volatile bool dma_busy = false;
-  static void dma_callback(Adafruit_ZeroDMA *dma) { dma_busy = false; }
-#endif
 
 uint32_t startTime;  // For FPS indicator
 
@@ -242,55 +224,6 @@ void setup(void) {
   } // Don't mirror receiver screen
 #endif
 
-#ifdef ARDUINO_ARCH_SAMD
-  // Set up SPI DMA on SAMD boards:
-  int                dmac_id;
-  volatile uint32_t *data_reg;
-  if(&TFT_PERIPH == &sercom0) {
-    dmac_id  = SERCOM0_DMAC_ID_TX;
-    data_reg = &SERCOM0->SPI.DATA.reg;
-#if defined SERCOM1
-  } else if(&TFT_PERIPH == &sercom1) {
-    dmac_id  = SERCOM1_DMAC_ID_TX;
-    data_reg = &SERCOM1->SPI.DATA.reg;
-#endif
-#if defined SERCOM2
-  } else if(&TFT_PERIPH == &sercom2) {
-    dmac_id  = SERCOM2_DMAC_ID_TX;
-    data_reg = &SERCOM2->SPI.DATA.reg;
-#endif
-#if defined SERCOM3
-  } else if(&TFT_PERIPH == &sercom3) {
-    dmac_id  = SERCOM3_DMAC_ID_TX;
-    data_reg = &SERCOM3->SPI.DATA.reg;
-#endif
-#if defined SERCOM4
-  } else if(&TFT_PERIPH == &sercom4) {
-    dmac_id  = SERCOM4_DMAC_ID_TX;
-    data_reg = &SERCOM4->SPI.DATA.reg;
-#endif
-#if defined SERCOM5
-  } else if(&TFT_PERIPH == &sercom5) {
-    dmac_id  = SERCOM5_DMAC_ID_TX;
-    data_reg = &SERCOM5->SPI.DATA.reg;
-#endif
-  }
-
-  Serial.println("DMA init");
-  dma.allocate();
-  dma.setTrigger(dmac_id);
-  dma.setAction(DMA_TRIGGER_ACTON_BEAT);
-  descriptor = dma.addDescriptor(
-    NULL,               // move data
-    (void *)data_reg,   // to here
-    sizeof dmaBuf[0],   // this many...
-    DMA_BEAT_SIZE_BYTE, // bytes/hword/words
-    true,               // increment source addr?
-    false);             // increment dest addr?
-  dma.setCallback(dma_callback);
-
-#endif // End SAMD-specific SPI DMA init
-
 #ifdef DISPLAY_BACKLIGHT
   Serial.println("Backlight on!");
   analogWrite(DISPLAY_BACKLIGHT, BACKLIGHT_MAX);
@@ -366,9 +299,6 @@ void drawEye( // Renders one eye.  Inputs must be pre-clipped & valid.
   scleraXsave = scleraX; // Save initial X value to reset on each line
   irisY       = scleraY - (SCLERA_HEIGHT - IRIS_HEIGHT) / 2;
   for(screenY=0; screenY<SCREEN_HEIGHT; screenY++, scleraY++, irisY++) {
-#ifdef ARDUINO_ARCH_SAMD
-    uint16_t *ptr = &dmaBuf[dmaIdx][0];
-#endif
     scleraX = scleraXsave;
     irisX   = scleraXsave - (SCLERA_WIDTH - IRIS_WIDTH) / 2;
     for(screenX=0; screenX<SCREEN_WIDTH; screenX++, scleraX++, irisX++) {
@@ -389,30 +319,15 @@ void drawEye( // Renders one eye.  Inputs must be pre-clipped & valid.
           p = sclera[scleraY][scleraX];                 // Pixel = sclera
         }
       }
-#ifdef ARDUINO_ARCH_SAMD
-      *ptr++ = __builtin_bswap16(p); // DMA: store in scanline buffer
-#else
       // SPI FIFO technique from Paul Stoffregen's ILI9341_t3 library:
       while(KINETISK_SPI0.SR & 0xC000); // Wait for space in FIFO
       KINETISK_SPI0.PUSHR = p | SPI_PUSHR_CTAS(1) | SPI_PUSHR_CONT;
-#endif
     } // end column
-#ifdef ARDUINO_ARCH_SAMD
-    while(dma_busy); // Wait for prior DMA xfer to finish
-    descriptor->SRCADDR.reg = (uint32_t)&dmaBuf[dmaIdx] + sizeof dmaBuf[0];
-    dma_busy = true;
-    dmaIdx   = 1 - dmaIdx;
-    dma.startJob();
-#endif
   } // end scanline
 
-#ifdef ARDUINO_ARCH_SAMD
-  while(dma_busy);  // Wait for last scanline to transmit
-#else
   KINETISK_SPI0.SR |= SPI_SR_TCF;         // Clear transfer flag
   while((KINETISK_SPI0.SR & 0xF000) ||    // Wait for SPI FIFO to drain
        !(KINETISK_SPI0.SR & SPI_SR_TCF)); // Wait for last bit out
-#endif
 
   digitalWrite(eyeInfo[e].select, HIGH);          // Deselect
   TFT_SPI.endTransaction();
