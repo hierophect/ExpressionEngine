@@ -12,6 +12,7 @@
 #define DISPLAY_RESET   8           // Reset pin for ALL displays
 #define DISPLAY_SEL1    9
 #define DISPLAY_SEL2    10  
+// #define SPI_FREQ        24000000    // OLED: 24 MHz on 72 MHz Teensy only (am I overclocking?)
 #define SPI_FREQ        12000000    // OLED: 24 MHz on 72 MHz Teensy only (am I overclocking?)
 
 // Color definitions
@@ -47,13 +48,13 @@ int cos_lookup[360] = {};
 int sin_lookup[360] = {};
 
 typedef struct {
-    uint8_t radius;
+    uint16_t radius;
     uint16_t color;
 } circleGlyph;
 
 typedef struct {
-    uint8_t width;
-    uint8_t height;
+    uint16_t width;
+    uint16_t height;
     uint16_t angle;
     uint16_t color;
 } rectGlyph;
@@ -70,14 +71,23 @@ typedef struct {
 } eyeGlyph;
 
 eyeGlyph glyphs[] = {
-    {64, 64, TYPE_CIRCLE, { .c = {32, WHITE} }},
-    {64, 64, TYPE_RECT, { .r = {32,128,90, RED} }},
+    {64, 64, TYPE_CIRCLE, { .c = {40, WHITE} }},
+    {4, 4, TYPE_RECT, { .r = {256,32,0, BLACK} }},
+    {4, 124, TYPE_RECT, { .r = {32,256,0, BLACK} }},
+    {124, 4, TYPE_RECT, { .r = {32,256,0, BLACK} }},
+    {124, 124, TYPE_RECT, { .r = {256,32,0, BLACK} }},
+
+    //{64, 64, TYPE_RECT, { .r = {32,128,90, RED} }},
 };
+
+// Examples:
+// {64, 64, TYPE_CIRCLE, { .c = {32, RED} }},
+// {64, 64, TYPE_RECT, { .r = {32,128,90, RED} }},
 
 void setup() {
     // start serial
     Serial.begin(115200);
-    while (!Serial);
+    //while (!Serial);
     Serial.println("Init");
 
     // manual reset since they share reset line
@@ -136,8 +146,19 @@ void setup() {
 }
 
 void loop() {
-    draw(0);
-    draw(1);
+    glyphs[0].c.color = WHITE;
+    for(int i = 0; i<25; i++) {
+        uint16_t altcolor = 0xF800 | ((0x3F - (0x02 * i)) << 5) | (0x1F - (0x01 *i));
+        glyphs[0].c.color = altcolor;
+        Serial.println(altcolor, HEX);
+
+        glyphs[1].r.angle = i;
+        glyphs[2].r.angle = i;
+        glyphs[3].r.angle = i;
+        glyphs[4].r.angle = i;
+        draw(0);
+        // draw(1);
+    }
 }
 
 void draw(uint8_t eye) {
@@ -187,7 +208,7 @@ void draw(uint8_t eye) {
                             && x2 > (glyphs[l].x - (glyphs[l].r.width/2)) 
                             && y2 < (glyphs[l].y + (glyphs[l].r.height/2)) 
                             && y2 > (glyphs[l].y - (glyphs[l].r.height/2))) {
-                        p = RED;
+                        p = glyphs[l].r.color;
                     }
                 }
             }
