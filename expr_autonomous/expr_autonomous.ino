@@ -71,11 +71,11 @@ typedef struct {
 } eyeGlyph;
 
 eyeGlyph glyphs[] = {
-    {64, 64, TYPE_CIRCLE, { .c = {40, WHITE} }},
-    {4, 4, TYPE_RECT, { .r = {255,32,0, BLACK} }},
-    {4, 124, TYPE_RECT, { .r = {32,255,0, BLACK} }},
-    {124, 4, TYPE_RECT, { .r = {32,255,0, BLACK} }},
-    {124, 124, TYPE_RECT, { .r = {255,32,0, BLACK} }},
+    {64, 64, TYPE_CIRCLE, { .c = {40, YELLOW} }},
+    // {4, 4, TYPE_RECT, { .r = {255,32,0, BLACK} }},
+    // {4, 124, TYPE_RECT, { .r = {32,255,0, BLACK} }},
+    // {124, 4, TYPE_RECT, { .r = {32,255,0, BLACK} }},
+    // {124, 124, TYPE_RECT, { .r = {255,32,0, BLACK} }},
 
     //{64, 64, TYPE_RECT, { .r = {32,128,90, RED} }},
 };
@@ -145,23 +145,78 @@ void setup() {
     delay(1000);
 }
 
+const uint8_t ease[] = { // Ease in/out curve for eye movements 3*t^2-2*t^3
+    0,  0,  0,  0,  0,  0,  0,  1,  1,  1,  1,  1,  2,  2,  2,  3,   // T
+    3,  3,  4,  4,  4,  5,  5,  6,  6,  7,  7,  8,  9,  9, 10, 10,   // h
+   11, 12, 12, 13, 14, 15, 15, 16, 17, 18, 18, 19, 20, 21, 22, 23,   // x
+   24, 25, 26, 27, 27, 28, 29, 30, 31, 33, 34, 35, 36, 37, 38, 39,   // 2
+   40, 41, 42, 44, 45, 46, 47, 48, 50, 51, 52, 53, 54, 56, 57, 58,   // A
+   60, 61, 62, 63, 65, 66, 67, 69, 70, 72, 73, 74, 76, 77, 78, 80,   // l
+   81, 83, 84, 85, 87, 88, 90, 91, 93, 94, 96, 97, 98,100,101,103,   // e
+  104,106,107,109,110,112,113,115,116,118,119,121,122,124,125,127,   // c
+  128,130,131,133,134,136,137,139,140,142,143,145,146,148,149,151,   // J
+  152,154,155,157,158,159,161,162,164,165,167,168,170,171,172,174,   // a
+  175,177,178,179,181,182,183,185,186,188,189,190,192,193,194,195,   // c
+  197,198,199,201,202,203,204,205,207,208,209,210,211,213,214,215,   // o
+  216,217,218,219,220,221,222,224,225,226,227,228,228,229,230,231,   // b
+  232,233,234,235,236,237,237,238,239,240,240,241,242,243,243,244,   // s
+  245,245,246,246,247,248,248,249,249,250,250,251,251,251,252,252,   // o
+  252,253,253,253,254,254,254,254,254,255,255,255,255,255,255,255 }; // n
+
 void loop() {
-    glyphs[0].c.color = WHITE;
-    for(int i = 0; i<25; i++) {
-        
-        uint16_t altcolor = 0xF800 | ((0x3F - (0x02 * i)) << 5) | (0x1F - (0x01 *i));
-        glyphs[0].c.color = altcolor;
-        Serial.println(altcolor, HEX);
+    int16_t         eyeX, eyeY;
+    uint32_t        t = micros(); // Time at start of function
 
-        glyphs[1].r.angle = i;
-        glyphs[2].r.angle = i;
-        glyphs[3].r.angle = i;
-        glyphs[4].r.angle = i;
+    static boolean  eyeInMotion      = false;
+    static int16_t  eyeOldX=512, eyeOldY=512, eyeNewX=512, eyeNewY=512;
+    static uint32_t eyeMoveStartTime = 0L;
+    static int32_t  eyeMoveDuration  = 0L;
 
-        draw(0);
-
-        // draw(1);
+    int32_t dt = t - eyeMoveStartTime;      // uS elapsed since last eye event
+  if(eyeInMotion) {                       // Currently moving?
+    if(dt >= eyeMoveDuration) {           // Time up?  Destination reached.
+      eyeInMotion      = false;           // Stop moving
+      eyeMoveDuration  = random(3000000); // 0-3 sec stop
+      eyeMoveStartTime = t;               // Save initial time of stop
+      eyeX = eyeOldX = eyeNewX;           // Save position
+      eyeY = eyeOldY = eyeNewY;
+    } else { // Move time's not yet fully elapsed -- interpolate position
+      int16_t e = ease[255 * dt / eyeMoveDuration] + 1;   // Ease curve
+      eyeX = eyeOldX + (((eyeNewX - eyeOldX) * e) / 256); // Interp X
+      eyeY = eyeOldY + (((eyeNewY - eyeOldY) * e) / 256); // and Y
     }
+  } else {                                // Eye stopped
+    eyeX = eyeOldX;
+    eyeY = eyeOldY;
+    if(dt > eyeMoveDuration) {            // Time up?  Begin new move.
+      int16_t  dx, dy;
+      uint32_t d;
+      do {                                // Pick new dest in circle
+        eyeNewX = random(1024);
+        eyeNewY = random(1024);
+        dx      = (eyeNewX * 2) - 1023;
+        dy      = (eyeNewY * 2) - 1023;
+      } while((d = (dx * dx + dy * dy)) > (1023 * 1023)); // Keep trying
+      eyeMoveDuration  = random(72000, 144000); // ~1/14 - ~1/7 sec
+      eyeMoveStartTime = t;               // Save initial time of move
+      eyeInMotion      = true;            // Start move on next frame
+    }
+  }
+
+  eyeX = map(eyeX, 0, 1023, 0, 128);
+  eyeY = map(eyeY, 0, 1023, 0, 128);
+
+  uint16_t evil = map(eyeX, 0, 1023, 0, 25);
+    uint16_t altcolor = 0xF800 | ((0x3F - (0x02 * evil)) << 5) | (0x1F - (0x01 *evil));
+    glyphs[0].c.color = altcolor;
+    glyphs[0].c.radius = 40-evil;
+
+  glyphs[0].x = eyeX;
+  glyphs[0].y = eyeY;
+
+  draw(0);
+  draw(1);
+
 }
 
 void draw(uint8_t eye) {
