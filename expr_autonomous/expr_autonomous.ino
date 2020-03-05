@@ -72,10 +72,10 @@ typedef struct {
 
 eyeGlyph glyphs[] = {
     {64, 64, TYPE_CIRCLE, { .c = {40, WHITE} }},
-    // {4, 4, TYPE_RECT, { .r = {255,32,0, BLACK} }},
-    // {4, 124, TYPE_RECT, { .r = {32,255,0, BLACK} }},
-    // {124, 4, TYPE_RECT, { .r = {32,255,0, BLACK} }},
-    // {124, 124, TYPE_RECT, { .r = {255,32,0, BLACK} }},
+    {4, 4, TYPE_RECT, { .r = {255,32,0, BLACK} }},
+    {4, 124, TYPE_RECT, { .r = {32,255,0, BLACK} }},
+    {124, 4, TYPE_RECT, { .r = {32,255,0, BLACK} }},
+    {124, 124, TYPE_RECT, { .r = {255,32,0, BLACK} }},
 
     //{64, 64, TYPE_RECT, { .r = {32,128,90, RED} }},
 };
@@ -151,20 +151,17 @@ void loop() {
         
         uint16_t altcolor = 0xF800 | ((0x3F - (0x02 * i)) << 5) | (0x1F - (0x01 *i));
         glyphs[0].c.color = altcolor;
-        glyphs[0].c.radius = 40-i;
         Serial.println(altcolor, HEX);
 
-        // glyphs[1].r.angle = i;
-        // glyphs[2].r.angle = i;
-        // glyphs[3].r.angle = i;
-        // glyphs[4].r.angle = i;
+        glyphs[1].r.angle = i;
+        glyphs[2].r.angle = i;
+        glyphs[3].r.angle = i;
+        glyphs[4].r.angle = i;
 
         draw(0);
-        draw(1);
-        delay(10);
-    }
-    delay(500);
 
+        // draw(1);
+    }
 }
 
 void draw(uint8_t eye) {

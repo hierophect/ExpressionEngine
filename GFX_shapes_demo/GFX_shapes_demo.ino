@@ -15,7 +15,7 @@
 #define SPI_FREQ 12000000  // OLED: 24 MHz on 72 MHz Teensy only
 
 // Color definitions
-#define  BLACK           0x0000
+#define BLACK           0x0000
 #define BLUE            0x001F
 #define RED             0xF800
 #define GREEN           0x07E0
