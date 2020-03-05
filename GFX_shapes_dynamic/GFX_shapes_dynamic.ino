@@ -12,8 +12,8 @@
 #define DISPLAY_RESET   8           // Reset pin for ALL displays
 #define DISPLAY_SEL1    9
 #define DISPLAY_SEL2    10  
-// #define SPI_FREQ        24000000    // OLED: 24 MHz on 72 MHz Teensy only (am I overclocking?)
-#define SPI_FREQ        12000000    // OLED: 24 MHz on 72 MHz Teensy only (am I overclocking?)
+#define SPI_FREQ        24000000    // OLED: 24 MHz on 72 MHz Teensy only (am I overclocking?)
+// #define SPI_FREQ        12000000    // OLED: 24 MHz on 72 MHz Teensy only (am I overclocking?)
 
 // Color definitions
 #define BLACK           0x0000
@@ -60,8 +60,8 @@ typedef struct {
 } rectGlyph;
 
 typedef struct {
-    uint8_t x;
-    uint8_t y;
+    uint16_t x;
+    uint16_t y;
     uint8_t type;
     union
     {
@@ -72,10 +72,10 @@ typedef struct {
 
 eyeGlyph glyphs[] = {
     {64, 64, TYPE_CIRCLE, { .c = {40, WHITE} }},
-    {4, 4, TYPE_RECT, { .r = {256,32,0, BLACK} }},
-    {4, 124, TYPE_RECT, { .r = {32,256,0, BLACK} }},
-    {124, 4, TYPE_RECT, { .r = {32,256,0, BLACK} }},
-    {124, 124, TYPE_RECT, { .r = {256,32,0, BLACK} }},
+    {4, 4, TYPE_RECT, { .r = {255,32,0, BLACK} }},
+    {4, 124, TYPE_RECT, { .r = {32,255,0, BLACK} }},
+    {124, 4, TYPE_RECT, { .r = {32,255,0, BLACK} }},
+    {124, 124, TYPE_RECT, { .r = {255,32,0, BLACK} }},
 
     //{64, 64, TYPE_RECT, { .r = {32,128,90, RED} }},
 };
@@ -148,6 +148,7 @@ void setup() {
 void loop() {
     glyphs[0].c.color = WHITE;
     for(int i = 0; i<25; i++) {
+        
         uint16_t altcolor = 0xF800 | ((0x3F - (0x02 * i)) << 5) | (0x1F - (0x01 *i));
         glyphs[0].c.color = altcolor;
         Serial.println(altcolor, HEX);
@@ -156,7 +157,9 @@ void loop() {
         glyphs[2].r.angle = i;
         glyphs[3].r.angle = i;
         glyphs[4].r.angle = i;
+
         draw(0);
+
         // draw(1);
     }
 }
@@ -181,6 +184,9 @@ void draw(uint8_t eye) {
 
     uint8_t layersize = sizeof(glyphs)/sizeof(*glyphs);
 
+    //TIMEBLOC ---------
+    uint16_t time = millis();
+
     for(uint8_t screenY = 0; screenY < SCREEN_HEIGHT; screenY++) {
         for(uint8_t screenX = 0; screenX < SCREEN_WIDTH; screenX++) {
             // pixel default is black unless changed
@@ -204,7 +210,7 @@ void draw(uint8_t eye) {
                                 (sin_lookup[glyphs[l].r.angle] * (yshi)) / 65535 + glyphs[l].x;
                     int y2 = (-sin_lookup[glyphs[l].r.angle]*(xshi)) / 65535 + 
                                 (cos_lookup[glyphs[l].r.angle] * (yshi)) / 65535 + glyphs[l].y;
-                    if (x2 < (glyphs[l].x + (glyphs[l].r.width/2)) 
+                    if (x2 < (glyphs[l].x + (glyphs[l].r.width / 2)) 
                             && x2 > (glyphs[l].x - (glyphs[l].r.width/2)) 
                             && y2 < (glyphs[l].y + (glyphs[l].r.height/2)) 
                             && y2 > (glyphs[l].y - (glyphs[l].r.height/2))) {
@@ -219,6 +225,8 @@ void draw(uint8_t eye) {
         } // end column
     } // end scanline
 
+    time = millis() - time;
+
     //manually end SPI transaction
     KINETISK_SPI0.SR |= SPI_SR_TCF;         // Clear transfer flag
     while((KINETISK_SPI0.SR & 0xF000) ||    // Wait for SPI FIFO to drain
@@ -226,4 +234,9 @@ void draw(uint8_t eye) {
 
     digitalWrite(select_pins[eye], HIGH);          // Deselect
     TFT_SPI.endTransaction();
+
+    //TIMEBLOC ---------
+    
+    Serial.println("Loop:");
+    Serial.println(time, DEC);
 }
