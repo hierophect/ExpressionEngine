@@ -141,7 +141,8 @@ void setup() {
     const uint8_t rotateOLED[] = { 0x74, 0x77, 0x66, 0x65 },
                 mirrorOLED[] = { 0x76, 0x67, 0x64, 0x75 }; // Mirror+rotate
     disp1.sendCommand(SSD1351_CMD_SETREMAP, &rotateOLED[0], 1); 
-    disp2.sendCommand(SSD1351_CMD_SETREMAP, &mirrorOLED[0], 1);
+    disp2.sendCommand(SSD1351_CMD_SETREMAP, &rotateOLED[0], 1); //no mirror
+    //disp2.sendCommand(SSD1351_CMD_SETREMAP, &mirrorOLED[0], 1);
     delay(1000);
 }
 
@@ -164,11 +165,11 @@ const uint8_t ease[] = { // Ease in/out curve for eye movements 3*t^2-2*t^3
   252,253,253,253,254,254,254,254,254,255,255,255,255,255,255,255 }; // n
 
 void loop() {
-    int16_t         eyeX, eyeY;
+    int16_t         eyeX, eyeY, eyeR;
     uint32_t        t = micros(); // Time at start of function
 
     static boolean  eyeInMotion      = false;
-    static int16_t  eyeOldX=512, eyeOldY=512, eyeNewX=512, eyeNewY=512;
+    static int16_t  eyeOldX=512, eyeOldY=512, eyeOldR=512, eyeNewX=512, eyeNewY=512, eyeNewR=512;
     static uint32_t eyeMoveStartTime = 0L;
     static int32_t  eyeMoveDuration  = 0L;
 
@@ -180,20 +181,24 @@ void loop() {
       eyeMoveStartTime = t;               // Save initial time of stop
       eyeX = eyeOldX = eyeNewX;           // Save position
       eyeY = eyeOldY = eyeNewY;
+      eyeR = eyeOldR = eyeNewR;
     } else { // Move time's not yet fully elapsed -- interpolate position
       int16_t e = ease[255 * dt / eyeMoveDuration] + 1;   // Ease curve
       eyeX = eyeOldX + (((eyeNewX - eyeOldX) * e) / 256); // Interp X
       eyeY = eyeOldY + (((eyeNewY - eyeOldY) * e) / 256); // and Y
+      eyeR = eyeOldR + (((eyeNewR - eyeOldR) * e) / 256); // and Y
     }
   } else {                                // Eye stopped
     eyeX = eyeOldX;
     eyeY = eyeOldY;
+    eyeR = eyeOldR;
     if(dt > eyeMoveDuration) {            // Time up?  Begin new move.
       int16_t  dx, dy;
       uint32_t d;
       do {                                // Pick new dest in circle
         eyeNewX = random(1024);
         eyeNewY = random(1024);
+        eyeNewR = random(1024);
         dx      = (eyeNewX * 2) - 1023;
         dy      = (eyeNewY * 2) - 1023;
       } while((d = (dx * dx + dy * dy)) > (1023 * 1023)); // Keep trying
@@ -206,7 +211,8 @@ void loop() {
   eyeX = map(eyeX, 0, 1023, 0, 128);
   eyeY = map(eyeY, 0, 1023, 0, 128);
 
-  uint16_t evil = map(eyeX, 0, 1023, 0, 25);
+  uint16_t evil = map(eyeR, 0, 1023, 0, 25);
+
     uint16_t altcolor = 0xF800 | ((0x3F - (0x02 * evil)) << 5) | (0x1F - (0x01 *evil));
     glyphs[0].c.color = altcolor;
     glyphs[0].c.radius = 40-evil;
