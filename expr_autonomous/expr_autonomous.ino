@@ -174,54 +174,54 @@ void loop() {
     static int32_t  eyeMoveDuration  = 0L;
 
     int32_t dt = t - eyeMoveStartTime;      // uS elapsed since last eye event
-  if(eyeInMotion) {                       // Currently moving?
-    if(dt >= eyeMoveDuration) {           // Time up?  Destination reached.
-      eyeInMotion      = false;           // Stop moving
-      eyeMoveDuration  = random(3000000); // 0-3 sec stop
-      eyeMoveStartTime = t;               // Save initial time of stop
-      eyeX = eyeOldX = eyeNewX;           // Save position
-      eyeY = eyeOldY = eyeNewY;
-      eyeR = eyeOldR = eyeNewR;
-    } else { // Move time's not yet fully elapsed -- interpolate position
-      int16_t e = ease[255 * dt / eyeMoveDuration] + 1;   // Ease curve
-      eyeX = eyeOldX + (((eyeNewX - eyeOldX) * e) / 256); // Interp X
-      eyeY = eyeOldY + (((eyeNewY - eyeOldY) * e) / 256); // and Y
-      eyeR = eyeOldR + (((eyeNewR - eyeOldR) * e) / 256); // and Y
+    if(eyeInMotion) {                       // Currently moving?
+        if(dt >= eyeMoveDuration) {           // Time up?  Destination reached.
+            eyeInMotion      = false;           // Stop moving
+            eyeMoveDuration  = random(3000000); // 0-3 sec stop
+            eyeMoveStartTime = t;               // Save initial time of stop
+            eyeX = eyeOldX = eyeNewX;           // Save position
+            eyeY = eyeOldY = eyeNewY;
+            eyeR = eyeOldR = eyeNewR;
+        } else { // Move time's not yet fully elapsed -- interpolate position
+            int16_t e = ease[255 * dt / eyeMoveDuration] + 1;   // Ease curve
+            eyeX = eyeOldX + (((eyeNewX - eyeOldX) * e) / 256); // Interp X
+            eyeY = eyeOldY + (((eyeNewY - eyeOldY) * e) / 256); // and Y
+            eyeR = eyeOldR + (((eyeNewR - eyeOldR) * e) / 256); // and Y
+        }
+    } else {                                // Eye stopped
+        eyeX = eyeOldX;
+        eyeY = eyeOldY;
+        eyeR = eyeOldR;
+        if(dt > eyeMoveDuration) {            // Time up?  Begin new move.
+            int16_t  dx, dy;
+            uint32_t d;
+            do {                                // Pick new dest in circle
+                eyeNewX = random(1024);
+                eyeNewY = random(1024);
+                eyeNewR = random(1024);
+                dx      = (eyeNewX * 2) - 1023;
+                dy      = (eyeNewY * 2) - 1023;
+            } while((d = (dx * dx + dy * dy)) > (1023 * 1023)); // Keep trying
+            eyeMoveDuration  = random(72000, 144000); // ~1/14 - ~1/7 sec
+            eyeMoveStartTime = t;               // Save initial time of move
+            eyeInMotion      = true;            // Start move on next frame
+        }
     }
-  } else {                                // Eye stopped
-    eyeX = eyeOldX;
-    eyeY = eyeOldY;
-    eyeR = eyeOldR;
-    if(dt > eyeMoveDuration) {            // Time up?  Begin new move.
-      int16_t  dx, dy;
-      uint32_t d;
-      do {                                // Pick new dest in circle
-        eyeNewX = random(1024);
-        eyeNewY = random(1024);
-        eyeNewR = random(1024);
-        dx      = (eyeNewX * 2) - 1023;
-        dy      = (eyeNewY * 2) - 1023;
-      } while((d = (dx * dx + dy * dy)) > (1023 * 1023)); // Keep trying
-      eyeMoveDuration  = random(72000, 144000); // ~1/14 - ~1/7 sec
-      eyeMoveStartTime = t;               // Save initial time of move
-      eyeInMotion      = true;            // Start move on next frame
-    }
-  }
 
-  eyeX = map(eyeX, 0, 1023, 0, 128);
-  eyeY = map(eyeY, 0, 1023, 0, 128);
+    eyeX = map(eyeX, 0, 1023, 0, 128);
+    eyeY = map(eyeY, 0, 1023, 0, 128);
 
-  uint16_t evil = map(eyeR, 0, 1023, 0, 25);
+    uint16_t evil = map(eyeR, 0, 1023, 0, 25);
 
     uint16_t altcolor = 0xF800 | ((0x3F - (0x02 * evil)) << 5) | (0x1F - (0x01 *evil));
     glyphs[0].c.color = altcolor;
     glyphs[0].c.radius = 40-evil;
 
-  glyphs[0].x = eyeX;
-  glyphs[0].y = eyeY;
+    glyphs[0].x = eyeX;
+    glyphs[0].y = eyeY;
 
-  draw(0);
-  draw(1);
+    draw(0);
+    draw(1);
 
 }
 

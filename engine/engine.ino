@@ -7,228 +7,88 @@
 #include <SPI.h>
 #include <Adafruit_GFX.h>
 
-typedef struct {        // Struct is defined before including config.h --
-  int8_t  select;       // pin numbers for each eye's screen select line
-  int8_t  wink;         // and wink button (or -1 if none) specified there,
-  uint8_t rotation;     // also display rotation.
-} eyeInfo_t;
+#define TFT_SPI        SPI
+#define TFT_PERIPH     PERIPH_SPI
+
+#include <Adafruit_SSD1351.h>       // OLED display library
 
 #include "config.h"     // ****** CONFIGURATION IS DONE IN HERE ******
 
-#if defined(_ADAFRUIT_ST7735H_) || defined(_ADAFRUIT_ST77XXH_)
-  typedef Adafruit_ST7735  displayType; // Using TFT display(s)
-#else
-  typedef Adafruit_SSD1351 displayType; // Using OLED display(s)
-#endif
+//create both screens
+Adafruit_SSD1351 disp1 = Adafruit_SSD1351(SCREEN_WIDTH, SCREEN_HEIGHT, &TFT_SPI,
+                        DISPLAY_SEL1, DISPLAY_DC, -1);
+Adafruit_SSD1351 disp2 = Adafruit_SSD1351(SCREEN_WIDTH, SCREEN_HEIGHT, &TFT_SPI,
+                        DISPLAY_SEL2, DISPLAY_DC, -1);
 
-// A simple state machine is used to control eye blinks/winks:
-#define NOBLINK 0       // Not currently engaged in a blink
-#define ENBLINK 1       // Eyelid is currently closing
-#define DEBLINK 2       // Eyelid is currently opening
-typedef struct {
-  uint8_t  state;       // NOBLINK/ENBLINK/DEBLINK
-  uint32_t duration;    // Duration of blink state (micros)
-  uint32_t startTime;   // Time (micros) of last state change
-} eyeBlink;
-
-#define NUM_EYES (sizeof eyeInfo / sizeof eyeInfo[0]) // config.h pin list
-
-struct {                // One-per-eye structure
-  displayType *display; // -> OLED/TFT object
-  eyeBlink     blink;   // Current blink/wink state
-} eye[NUM_EYES];
-
-uint32_t startTime;  // For FPS indicator
-
-#if defined(SYNCPIN) && (SYNCPIN >= 0)
-#include <Wire.h>
-// If two boards are synchronized over I2C, this struct is passed from one
-// to other. No device-independent packing & unpacking is performed...both
-// boards are expected to be the same architecture & endianism.
-struct {
-  uint16_t iScale;  // These are basically the same arguments as
-  uint8_t  scleraX; // drawEye() expects, explained in that function.
-  uint8_t  scleraY;
-  uint8_t  uT;
-  uint8_t  lT;
-} syncStruct = { 512,
-  (SCLERA_WIDTH-SCREEN_WIDTH)/2, (SCLERA_HEIGHT-SCREEN_HEIGHT)/2, 0, 0 };
-
-void wireCallback(int n) {
-  if(n == sizeof syncStruct) {
-    // Read 'n' bytes from I2C into syncStruct
-    uint8_t *ptr = (uint8_t *)&syncStruct;
-    for(uint8_t i=0; i < sizeof syncStruct; i++) {
-      ptr[i] = Wire.read();
-    }
-  }
-}
-
-bool receiver = false;
-#endif // SYNCPIN
-
-// INITIALIZATION -- runs once at startup ----------------------------------
-
-void setup(void) {
-  uint8_t e; // Eye index, 0 to NUM_EYES-1
-
-#if defined(SYNCPIN) && (SYNCPIN >= 0) // If using I2C sync...
-  pinMode(SYNCPIN, INPUT_PULLUP);      // Check for jumper to ground
-  if(!digitalRead(SYNCPIN)) {          // If there...
-    receiver = true;                   // Set this one up as receiver
-    Wire.begin(SYNCADDR);
-    Wire.onReceive(wireCallback);
-  } else {
-    Wire.begin();                      // Else set up as sender
-  }
-#endif
-
-  Serial.begin(115200);
-  //while (!Serial);
-  Serial.println("Init");
-  randomSeed(analogRead(A3)); // Seed random() from floating analog input
-
-#ifdef DISPLAY_BACKLIGHT
-  // Enable backlight pin, initially off
-  Serial.println("Backlight off");
-  pinMode(DISPLAY_BACKLIGHT, OUTPUT);
-  digitalWrite(DISPLAY_BACKLIGHT, LOW);
-#endif
-
-  // Initialize eye objects based on eyeInfo list in config.h:
-  for(e=0; e<NUM_EYES; e++) {
-    Serial.print("Create display #"); Serial.println(e);
-#if defined(_ADAFRUIT_ST7735H_) || defined(_ADAFRUIT_ST77XXH_) // TFT
-    eye[e].display     = new displayType(&TFT_SPI, eyeInfo[e].select,
-                           DISPLAY_DC, -1);
-#else // OLED
-    eye[e].display     = new displayType(128, 128, &TFT_SPI,
-                           eyeInfo[e].select, DISPLAY_DC, -1);
-#endif
-    eye[e].blink.state = NOBLINK;
-    // If project involves only ONE eye and NO other SPI devices, its
-    // select line can be permanently tied to GND and corresponding pin
-    // in config.h set to -1.  Best to use it though.
-    if(eyeInfo[e].select >= 0) {
-      pinMode(eyeInfo[e].select, OUTPUT);
-      digitalWrite(eyeInfo[e].select, HIGH); // Deselect them all
-    }
-    // Also set up an individual eye-wink pin if defined:
-    if(eyeInfo[e].wink >= 0) pinMode(eyeInfo[e].wink, INPUT_PULLUP);
-  }
-#if defined(BLINK_PIN) && (BLINK_PIN >= 0)
-  pinMode(BLINK_PIN, INPUT_PULLUP); // Ditto for all-eyes blink pin
-#endif
-
-#if defined(DISPLAY_RESET) && (DISPLAY_RESET >= 0)
-  // Because both displays share a common reset pin, -1 is passed to
-  // the display constructor above to prevent the begin() function from
-  // resetting both displays after one is initialized.  Instead, handle
-  // the reset manually here to take care of both displays just once:
-  Serial.println("Reset displays");
-  pinMode(DISPLAY_RESET, OUTPUT);
-  digitalWrite(DISPLAY_RESET, LOW);  delay(1);
-  digitalWrite(DISPLAY_RESET, HIGH); delay(50);
-  // Alternately, all display reset pin(s) could be connected to the
-  // microcontroller reset, in which case DISPLAY_RESET should be set
-  // to -1 or left undefined in config.h.
-#endif
-
-  // After all-displays reset, now call init/begin func for each display:
-  for(e=0; e<NUM_EYES; e++) {
-#if defined(_ADAFRUIT_ST7735H_) || defined(_ADAFRUIT_ST77XXH_) // TFT
-    eye[e].display->initR(INITR_144GREENTAB);
-    Serial.print("Init ST77xx display #"); Serial.println(e);
-#else // OLED
-    eye[e].display->begin();
-#endif
-    Serial.println("Rotate");
-    eye[e].display->setRotation(eyeInfo[e].rotation);
-  }
-  Serial.println("done");
-
-#ifdef DISPLAY_BACKLIGHT
-  Serial.println("Backlight on!");
-  analogWrite(DISPLAY_BACKLIGHT, BACKLIGHT_MAX);
-#endif
-
-  startTime = millis(); // For frame-rate calculation
-}
-
-
-// EYE-RENDERING FUNCTION --------------------------------------------------
+Adafruit_SSD1351 displays[] = {disp1, disp2};
+uint8_t select_pins[] = {DISPLAY_SEL1, DISPLAY_SEL2};
 
 SPISettings settings(SPI_FREQ, MSBFIRST, SPI_MODE0);
 
-void drawEye( // Renders one eye.  Inputs must be pre-clipped & valid.
-  uint8_t  e,       // Eye array index; 0 or 1 for left/right
-  uint8_t  orbX, // First pixel X offset into sclera image
-  uint8_t  orbY, // First pixel Y offset into sclera image
-  uint8_t cubeX,
-  uint8_t cubeY,
-  uint16_t cubeR) {
+int cos_lookup[360] = {};
+int sin_lookup[360] = {};
 
-  uint8_t  screenX, screenY, scleraXsave;
-  int16_t  irisX, irisY;
-  uint16_t p, a;
-  uint32_t d;
+void setup() {
+    // start serial
+    Serial.begin(115200);
+    //while (!Serial);
+    Serial.println("Init");
 
-  // Set up raw pixel dump to entire screen.  Although such writes can wrap
-  // around automatically from end of rect back to beginning, the region is
-  // reset on each frame here in case of an SPI glitch.
-  TFT_SPI.beginTransaction(settings);
-  digitalWrite(eyeInfo[e].select, LOW);                        // Chip select
-#if defined(_ADAFRUIT_ST7735H_) || defined(_ADAFRUIT_ST77XXH_) // TFT
-  eye[e].display->setAddrWindow(0, 0, 128, 128);
-#else // OLED
-  eye[e].display->writeCommand(SSD1351_CMD_SETROW);    // Y range
-  eye[e].display->spiWrite(0); eye[e].display->spiWrite(SCREEN_HEIGHT - 1);
-  eye[e].display->writeCommand(SSD1351_CMD_SETCOLUMN); // X range
-  eye[e].display->spiWrite(0); eye[e].display->spiWrite(SCREEN_WIDTH  - 1);
-  eye[e].display->writeCommand(SSD1351_CMD_WRITERAM);  // Begin write
-#endif
-  digitalWrite(eyeInfo[e].select, LOW);                // Re-chip-select
-  digitalWrite(DISPLAY_DC, HIGH);                      // Data mode
-  // Now just issue raw 16-bit values for every pixel...
+    // manual reset since they share reset line
+    Serial.println("Reset displays");
+    pinMode(DISPLAY_RESET, OUTPUT);
+    digitalWrite(DISPLAY_RESET, LOW);  delay(1);
+    digitalWrite(DISPLAY_RESET, HIGH); delay(50);
 
-  scleraXsave = scleraX; // Save initial X value to reset on each line
-  irisY       = scleraY - (SCLERA_HEIGHT - IRIS_HEIGHT) / 2;
-  for(screenY=0; screenY<SCREEN_HEIGHT; screenY++, scleraY++, irisY++) {
-    scleraX = scleraXsave;
-    irisX   = scleraXsave - (SCLERA_WIDTH - IRIS_WIDTH) / 2;
-    for(screenX=0; screenX<SCREEN_WIDTH; screenX++, scleraX++, irisX++) {
-      if((lower[screenY][screenX] <= lT) ||
-         (upper[screenY][screenX] <= uT)) {             // Covered by eyelid
-        p = 0;
-      } else if((irisY < 0) || (irisY >= IRIS_HEIGHT) ||
-                (irisX < 0) || (irisX >= IRIS_WIDTH)) { // In sclera
-        p = sclera[scleraY][scleraX];
-      } else {                                          // Maybe iris...
-        p = polar[irisY][irisX];                        // Polar angle/dist
-        d = p & 0x7F;                                   // Distance from edge (0-127)
-        if(d < irisThreshold) {                         // Within scaled iris area
-          d = d * irisScale / 65536;                    // d scaled to iris image height
-          a = (IRIS_MAP_WIDTH * (p >> 7)) / 512;        // Angle (X)
-          p = iris[d][a];                               // Pixel = iris
-        } else {                                        // Not in iris
-          p = sclera[scleraY][scleraX];                 // Pixel = sclera
-        }
-      }
-      // SPI FIFO technique from Paul Stoffregen's ILI9341_t3 library:
-      while(KINETISK_SPI0.SR & 0xC000); // Wait for space in FIFO
-      KINETISK_SPI0.PUSHR = p | SPI_PUSHR_CTAS(1) | SPI_PUSHR_CONT;
-    } // end column
-  } // end scanline
+    // hold sel high for both screens
+    pinMode(DISPLAY_SEL1, OUTPUT);
+    digitalWrite(DISPLAY_SEL1, HIGH);  
+    pinMode(DISPLAY_SEL2, OUTPUT);
+    digitalWrite(DISPLAY_SEL2, HIGH); 
 
-  KINETISK_SPI0.SR |= SPI_SR_TCF;         // Clear transfer flag
-  while((KINETISK_SPI0.SR & 0xF000) ||    // Wait for SPI FIFO to drain
-       !(KINETISK_SPI0.SR & SPI_SR_TCF)); // Wait for last bit out
+    // disp1 setup
+    disp1.begin();
+    disp1.setRotation(0);
+    disp1.fillScreen(BLACK);
+    // disp2 setup
+    disp2.begin();
+    disp2.setRotation(0);
+    disp2.fillScreen(BLACK);
+    Serial.println("Init done");
 
-  digitalWrite(eyeInfo[e].select, HIGH);          // Deselect
-  TFT_SPI.endTransaction();
+    // only print debug to one eye
+    disp1.setCursor(0, 5);
+    disp1.setTextColor(YELLOW);  
+    disp1.setTextSize(1);
+    disp1.println("Calculating Lookup");
+
+    //calculate the trig lookup tables
+    uint16_t time = millis();
+    for(int i=0;i<360;i++) {
+        float i_fl = (float)i;
+        cos_lookup[i] = cos(i_fl/57.2958)*65535;
+        sin_lookup[i] = sin(i_fl/57.2958)*65535;
+    }
+    time = millis() - time;
+    Serial.println("trig calcs:");
+    Serial.println(time, DEC);
+    Serial.println("Processor Speed:");
+    Serial.println(F_CPU, DEC);
+    disp1.fillScreen(BLACK);
+    disp1.setCursor(0, 5);
+    disp1.setTextColor(YELLOW);  
+    disp1.setTextSize(1);
+    disp1.println("Done");
+
+    //set rotation & mirroring
+    //I'd condense this but it takes pointers, and I might want to change later.
+    const uint8_t rotateOLED[] = { 0x74, 0x77, 0x66, 0x65 },
+                mirrorOLED[] = { 0x76, 0x67, 0x64, 0x75 }; // Mirror+rotate
+    disp1.sendCommand(SSD1351_CMD_SETREMAP, &rotateOLED[0], 1); 
+    //disp2.sendCommand(SSD1351_CMD_SETREMAP, &rotateOLED[0], 1); //no mirror
+    disp2.sendCommand(SSD1351_CMD_SETREMAP, &mirrorOLED[0], 1);
+    delay(1000);
 }
-
-// EYE ANIMATION -----------------------------------------------------------
 
 const uint8_t ease[] = { // Ease in/out curve for eye movements 3*t^2-2*t^3
     0,  0,  0,  0,  0,  0,  0,  1,  1,  1,  1,  1,  2,  2,  2,  3,   // T
@@ -248,274 +108,163 @@ const uint8_t ease[] = { // Ease in/out curve for eye movements 3*t^2-2*t^3
   245,245,246,246,247,248,248,249,249,250,250,251,251,251,252,252,   // o
   252,253,253,253,254,254,254,254,254,255,255,255,255,255,255,255 }; // n
 
-#ifdef AUTOBLINK
-uint32_t timeOfLastBlink = 0L, timeToNextBlink = 0L;
-#endif
-
-void frame( // Process motion for a single frame of left or right eye
-  uint16_t        iScale) {     // Iris scale (0-1023) passed in
-  static uint32_t frames   = 0; // Used in frame rate calculation
-  static uint8_t  eyeIndex = 0; // eye[] array counter
-  int16_t         eyeX, eyeY;
-  uint32_t        t = micros(); // Time at start of function
-
-  if(!(++frames & 255)) { // Every 256 frames...
-    uint32_t elapsed = (millis() - startTime) / 1000;
-    if(elapsed) Serial.println(frames / elapsed); // Print FPS
-  }
-
-  if(++eyeIndex >= NUM_EYES) eyeIndex = 0; // Cycle through eyes, 1 per call
-
-  // X/Y movement
-
-#if defined(JOYSTICK_X_PIN) && (JOYSTICK_X_PIN >= 0) && \
-    defined(JOYSTICK_Y_PIN) && (JOYSTICK_Y_PIN >= 0)
-
-  // Read X/Y from joystick, constrain to circle
-  int16_t dx, dy;
-  int32_t d;
-  eyeX = analogRead(JOYSTICK_X_PIN); // Raw (unclipped) X/Y reading
-  eyeY = analogRead(JOYSTICK_Y_PIN);
-#ifdef JOYSTICK_X_FLIP
-  eyeX = 1023 - eyeX;
-#endif
-#ifdef JOYSTICK_Y_FLIP
-  eyeY = 1023 - eyeY;
-#endif
-  dx = (eyeX * 2) - 1023; // A/D exact center is at 511.5.  Scale coords
-  dy = (eyeY * 2) - 1023; // X2 so range is -1023 to +1023 w/center at 0.
-  if((d = (dx * dx + dy * dy)) > (1023 * 1023)) { // Outside circle
-    d    = (int32_t)sqrt((float)d);               // Distance from center
-    eyeX = ((dx * 1023 / d) + 1023) / 2;          // Clip to circle edge,
-    eyeY = ((dy * 1023 / d) + 1023) / 2;          // scale back to 0-1023
-  }
-
-#else // Autonomous X/Y eye motion
-      // Periodically initiates motion to a new random point, random speed,
-      // holds there for random period until next motion.
-
-  static boolean  eyeInMotion      = false;
-  static int16_t  eyeOldX=512, eyeOldY=512, eyeNewX=512, eyeNewY=512;
-  static uint32_t eyeMoveStartTime = 0L;
-  static int32_t  eyeMoveDuration  = 0L;
-
-  int32_t dt = t - eyeMoveStartTime;      // uS elapsed since last eye event
-  if(eyeInMotion) {                       // Currently moving?
-    if(dt >= eyeMoveDuration) {           // Time up?  Destination reached.
-      eyeInMotion      = false;           // Stop moving
-      eyeMoveDuration  = random(3000000); // 0-3 sec stop
-      eyeMoveStartTime = t;               // Save initial time of stop
-      eyeX = eyeOldX = eyeNewX;           // Save position
-      eyeY = eyeOldY = eyeNewY;
-    } else { // Move time's not yet fully elapsed -- interpolate position
-      int16_t e = ease[255 * dt / eyeMoveDuration] + 1;   // Ease curve
-      eyeX = eyeOldX + (((eyeNewX - eyeOldX) * e) / 256); // Interp X
-      eyeY = eyeOldY + (((eyeNewY - eyeOldY) * e) / 256); // and Y
-    }
-  } else {                                // Eye stopped
-    eyeX = eyeOldX;
-    eyeY = eyeOldY;
-    if(dt > eyeMoveDuration) {            // Time up?  Begin new move.
-      int16_t  dx, dy;
-      uint32_t d;
-      do {                                // Pick new dest in circle
-        eyeNewX = random(1024);
-        eyeNewY = random(1024);
-        dx      = (eyeNewX * 2) - 1023;
-        dy      = (eyeNewY * 2) - 1023;
-      } while((d = (dx * dx + dy * dy)) > (1023 * 1023)); // Keep trying
-      eyeMoveDuration  = random(72000, 144000); // ~1/14 - ~1/7 sec
-      eyeMoveStartTime = t;               // Save initial time of move
-      eyeInMotion      = true;            // Start move on next frame
-    }
-  }
-
-#endif // JOYSTICK_X_PIN etc.
-
-  // Blinking
-
-#ifdef AUTOBLINK
-  // Similar to the autonomous eye movement above -- blink start times
-  // and durations are random (within ranges).
-  if((t - timeOfLastBlink) >= timeToNextBlink) { // Start new blink?
-    timeOfLastBlink = t;
-    uint32_t blinkDuration = random(36000, 72000); // ~1/28 - ~1/14 sec
-    // Set up durations for both eyes (if not already winking)
-    for(uint8_t e=0; e<NUM_EYES; e++) {
-      if(eye[e].blink.state == NOBLINK) {
-        eye[e].blink.state     = ENBLINK;
-        eye[e].blink.startTime = t;
-        eye[e].blink.duration  = blinkDuration;
-      }
-    }
-    timeToNextBlink = blinkDuration * 3 + random(4000000);
-  }
-#endif
-
-  if(eye[eyeIndex].blink.state) { // Eye currently blinking?
-    // Check if current blink state time has elapsed
-    if((t - eye[eyeIndex].blink.startTime) >= eye[eyeIndex].blink.duration) {
-      // Yes -- increment blink state, unless...
-      if((eye[eyeIndex].blink.state == ENBLINK) && ( // Enblinking and...
-#if defined(BLINK_PIN) && (BLINK_PIN >= 0)
-        (digitalRead(BLINK_PIN) == LOW) ||           // blink or wink held...
-#endif
-        ((eyeInfo[eyeIndex].wink >= 0) &&
-         digitalRead(eyeInfo[eyeIndex].wink) == LOW) )) {
-        // Don't advance state yet -- eye is held closed instead
-      } else { // No buttons, or other state...
-        if(++eye[eyeIndex].blink.state > DEBLINK) { // Deblinking finished?
-          eye[eyeIndex].blink.state = NOBLINK;      // No longer blinking
-        } else { // Advancing from ENBLINK to DEBLINK mode
-          eye[eyeIndex].blink.duration *= 2; // DEBLINK is 1/2 ENBLINK speed
-          eye[eyeIndex].blink.startTime = t;
-        }
-      }
-    }
-  } else { // Not currently blinking...check buttons!
-#if defined(BLINK_PIN) && (BLINK_PIN >= 0)
-    if(digitalRead(BLINK_PIN) == LOW) {
-      // Manually-initiated blinks have random durations like auto-blink
-      uint32_t blinkDuration = random(36000, 72000);
-      for(uint8_t e=0; e<NUM_EYES; e++) {
-        if(eye[e].blink.state == NOBLINK) {
-          eye[e].blink.state     = ENBLINK;
-          eye[e].blink.startTime = t;
-          eye[e].blink.duration  = blinkDuration;
-        }
-      }
-    } else
-#endif
-    if((eyeInfo[eyeIndex].wink >= 0) &&
-       (digitalRead(eyeInfo[eyeIndex].wink) == LOW)) { // Wink!
-      eye[eyeIndex].blink.state     = ENBLINK;
-      eye[eyeIndex].blink.startTime = t;
-      eye[eyeIndex].blink.duration  = random(45000, 90000);
-    }
-  }
-
-  // Process motion, blinking and iris scale into renderable values
-
-  // Scale eye X/Y positions (0-1023) to pixel units used by drawEye()
-  eyeX = map(eyeX, 0, 1023, 0, SCLERA_WIDTH  - 128);
-  eyeY = map(eyeY, 0, 1023, 0, SCLERA_HEIGHT - 128);
-  if(eyeIndex == 1) eyeX = (SCLERA_WIDTH - 128) - eyeX; // Mirrored display
-
-  // Horizontal position is offset so that eyes are very slightly crossed
-  // to appear fixated (converged) at a conversational distance.  Number
-  // here was extracted from my posterior and not mathematically based.
-  // I suppose one could get all clever with a range sensor, but for now...
-  if(NUM_EYES > 1) eyeX += 4;
-  if(eyeX > (SCLERA_WIDTH - 128)) eyeX = (SCLERA_WIDTH - 128);
-
-  // Eyelids are rendered using a brightness threshold image.  This same
-  // map can be used to simplify another problem: making the upper eyelid
-  // track the pupil (eyes tend to open only as much as needed -- e.g. look
-  // down and the upper eyelid drops).  Just sample a point in the upper
-  // lid map slightly above the pupil to determine the rendering threshold.
-  static uint8_t uThreshold = 128;
-  uint8_t        lThreshold, n;
-#ifdef TRACKING
-  int16_t sampleX = SCLERA_WIDTH  / 2 - (eyeX / 2), // Reduce X influence
-          sampleY = SCLERA_HEIGHT / 2 - (eyeY + IRIS_HEIGHT / 4);
-  // Eyelid is slightly asymmetrical, so two readings are taken, averaged
-  if(sampleY < 0) n = 0;
-  else            n = (upper[sampleY][sampleX] +
-                       upper[sampleY][SCREEN_WIDTH - 1 - sampleX]) / 2;
-  uThreshold = (uThreshold * 3 + n) / 4; // Filter/soften motion
-  // Lower eyelid doesn't track the same way, but seems to be pulled upward
-  // by tension from the upper lid.
-  lThreshold = 254 - uThreshold;
-#else // No tracking -- eyelids full open unless blink modifies them
-  uThreshold = lThreshold = 0;
-#endif
-
-  // The upper/lower thresholds are then scaled relative to the current
-  // blink position so that blinks work together with pupil tracking.
-  if(eye[eyeIndex].blink.state) { // Eye currently blinking?
-    uint32_t s = (t - eye[eyeIndex].blink.startTime);
-    if(s >= eye[eyeIndex].blink.duration) s = 255;   // At or past blink end
-    else s = 255 * s / eye[eyeIndex].blink.duration; // Mid-blink
-    s          = (eye[eyeIndex].blink.state == DEBLINK) ? 1 + s : 256 - s;
-    n          = (uThreshold * s + 254 * (257 - s)) / 256;
-    lThreshold = (lThreshold * s + 254 * (257 - s)) / 256;
-  } else {
-    n          = uThreshold;
-  }
-
-  // Pass all the derived values to the eye-rendering function:
-  drawEye(eyeIndex, iScale, eyeX, eyeY, n, lThreshold);
-}
-
-// AUTONOMOUS IRIS SCALING (if no photocell or dial) -----------------------
-
-#if !defined(LIGHT_PIN) || (LIGHT_PIN < 0)
-
-// Autonomous iris motion uses a fractal behavior to similate both the major
-// reaction of the eye plus the continuous smaller adjustments that occur.
-
-uint16_t oldIris = (IRIS_MIN + IRIS_MAX) / 2, newIris;
-
-void split( // Subdivides motion path into two sub-paths w/randimization
-  int16_t  startValue, // Iris scale value (IRIS_MIN to IRIS_MAX) at start
-  int16_t  endValue,   // Iris scale value at end
-  uint32_t startTime,  // micros() at start
-  int32_t  duration,   // Start-to-end time, in microseconds
-  int16_t  range) {    // Allowable scale value variance when subdividing
-
-  if(range >= 8) {     // Limit subdvision count, because recursion
-    range    /= 2;     // Split range & time in half for subdivision,
-    duration /= 2;     // then pick random center point within range:
-    int16_t  midValue = (startValue + endValue - range) / 2 + random(range);
-    uint32_t midTime  = startTime + duration;
-    split(startValue, midValue, startTime, duration, range); // First half
-    split(midValue  , endValue, midTime  , duration, range); // Second half
-  } else {             // No more subdivisons, do iris motion...
-    int32_t dt;        // Time (micros) since start of motion
-    int16_t v;         // Interim value
-    while((dt = (micros() - startTime)) < duration) {
-      v = startValue + (((endValue - startValue) * dt) / duration);
-      if(v < IRIS_MIN)      v = IRIS_MIN; // Clip just in case
-      else if(v > IRIS_MAX) v = IRIS_MAX;
-      frame(v);        // Draw frame w/interim iris scale value
-    }
-  }
-}
-
-#endif // !LIGHT_PIN
-
-// MAIN LOOP -- runs continuously after setup() ----------------------------
+#define PUPIL_GLYPH 0
 
 void loop() {
+    int16_t         eyeX, eyeY, eyeR;
+    uint32_t        t = micros(); // Time at start of function
 
-#if defined(LIGHT_PIN) && (LIGHT_PIN >= 0) // Interactive iris
+    static boolean  eyeInMotion      = false;
+    static int16_t  eyeOldX=512, eyeOldY=512, eyeOldR=512, eyeNewX=512, eyeNewY=512, eyeNewR=512;
+    static uint32_t eyeMoveStartTime = 0L;
+    static int32_t  eyeMoveDuration  = 0L;
 
-  int16_t v = analogRead(LIGHT_PIN);       // Raw dial/photocell reading
-#ifdef LIGHT_PIN_FLIP
-  v = 1023 - v;                            // Reverse reading from sensor
-#endif
-  if(v < LIGHT_MIN)      v = LIGHT_MIN;  // Clamp light sensor range
-  else if(v > LIGHT_MAX) v = LIGHT_MAX;
-  v -= LIGHT_MIN;  // 0 to (LIGHT_MAX - LIGHT_MIN)
-#ifdef LIGHT_CURVE  // Apply gamma curve to sensor input?
-  v = (int16_t)(pow((double)v / (double)(LIGHT_MAX - LIGHT_MIN),
-    LIGHT_CURVE) * (double)(LIGHT_MAX - LIGHT_MIN));
-#endif
-  // And scale to iris range (IRIS_MAX is size at LIGHT_MIN)
-  v = map(v, 0, (LIGHT_MAX - LIGHT_MIN), IRIS_MAX, IRIS_MIN);
-#ifdef IRIS_SMOOTH // Filter input (gradual motion)
-  static int16_t irisValue = (IRIS_MIN + IRIS_MAX) / 2;
-  irisValue = ((irisValue * 15) + v) / 16;
-  frame(irisValue);
-#else // Unfiltered (immediate motion)
-  frame(v);
-#endif // IRIS_SMOOTH
+    int32_t dt = t - eyeMoveStartTime;      // uS elapsed since last eye event
+    if(eyeInMotion) {                       // Currently moving?
+        if(dt >= eyeMoveDuration) {           // Time up?  Destination reached.
+            eyeInMotion      = false;           // Stop moving
+            eyeMoveDuration  = random(3000000); // 0-3 sec stop
+            eyeMoveStartTime = t;               // Save initial time of stop
+            eyeX = eyeOldX = eyeNewX;           // Save position
+            eyeY = eyeOldY = eyeNewY;
+            eyeR = eyeOldR = eyeNewR;
+        } else { // Move time's not yet fully elapsed -- interpolate position
+            int16_t e = ease[255 * dt / eyeMoveDuration] + 1;   // Ease curve
+            eyeX = eyeOldX + (((eyeNewX - eyeOldX) * e) / 256); // Interp X
+            eyeY = eyeOldY + (((eyeNewY - eyeOldY) * e) / 256); // and Y
+            eyeR = eyeOldR + (((eyeNewR - eyeOldR) * e) / 256); // and Y
+        }
+    } else {                                // Eye stopped
+        eyeX = eyeOldX;
+        eyeY = eyeOldY;
+        eyeR = eyeOldR;
+        if(dt > eyeMoveDuration) {            // Time up?  Begin new move.
+            int16_t  dx, dy;
+            uint32_t d;
+            do {                                // Pick new dest in circle
+                eyeNewX = random(1024);
+                eyeNewY = random(1024);
+                eyeNewR = random(1024);
+                dx      = (eyeNewX * 2) - 1023;
+                dy      = (eyeNewY * 2) - 1023;
+            } while((d = (dx * dx + dy * dy)) > (1023 * 1023)); // Keep trying
+            eyeMoveDuration  = random(72000, 144000); // ~1/14 - ~1/7 sec
+            eyeMoveStartTime = t;               // Save initial time of move
+            eyeInMotion      = true;            // Start move on next frame
+        }
+    }
 
-#else  // Autonomous iris scaling -- invoke recursive function
+    eyeX = map(eyeX, 0, 1023, 30, 100);
+    eyeY = map(eyeY, 0, 1023, 50, 100);
 
-  newIris = random(IRIS_MIN, IRIS_MAX);
-  split(oldIris, newIris, micros(), 10000000L, IRIS_MAX - IRIS_MIN);
-  oldIris = newIris;
+    uint16_t evil = map(eyeR, 0, 1023, 0, 25);
 
-#endif // LIGHT_PIN
+    uint16_t altcolor = 0xF800 | ((0x3F - (0x02 * evil)) << 5) | (0x1F - (0x01 *evil));
+    //glyphs[PUPIL_GLYPH].c.color = altcolor;
+    //glyphs[PUPIL_GLYPH].c.radius = 40-evil;
+
+    glyphs[PUPIL_GLYPH].x = eyeX;
+    glyphs[PUPIL_GLYPH].y = eyeY;
+
+    draw(0);
+
+    glyphs[PUPIL_GLYPH].x = 128 - eyeX;
+
+    draw(1);
+
 }
+
+void draw(uint8_t eye) {
+    uint16_t p = 0; 
+
+    //manually start transaction (OLED)
+    TFT_SPI.beginTransaction(settings);
+    digitalWrite(select_pins[eye], LOW);
+    displays[eye].writeCommand(SSD1351_CMD_SETROW);    // Y range
+    displays[eye].spiWrite(0); 
+    displays[eye].spiWrite(SCREEN_HEIGHT - 1);
+    displays[eye].writeCommand(SSD1351_CMD_SETCOLUMN); // X range
+    displays[eye].spiWrite(0); 
+    displays[eye].spiWrite(SCREEN_WIDTH  - 1);
+    displays[eye].writeCommand(SSD1351_CMD_WRITERAM);  // Begin write
+
+    //manually start data mode
+    digitalWrite(select_pins[eye], LOW);                // Re-chip-select
+    digitalWrite(DISPLAY_DC, HIGH);                      // Data mode
+
+    uint8_t layersize = sizeof(glyphs)/sizeof(*glyphs);
+
+    //TIMEBLOC ---------
+    uint16_t time = millis();
+
+    for(uint8_t screenY = 0; screenY < SCREEN_HEIGHT; screenY++) {
+        for(uint8_t screenX = 0; screenX < SCREEN_WIDTH; screenX++) {
+            // pixel default is black unless changed
+            p = BLACK;
+            // layers are evaluated per pixel
+            for(uint8_t l = 0; l < layersize; l++) {
+                // pixel evaluation differs by type
+                if (glyphs[l].type == TYPE_CIRCLE) {
+                    // circle equation: (xp−xc)^2+(yp−yc)^2 < r^2
+                    int dsqr = (screenX - glyphs[l].x) * (screenX - glyphs[l].x) 
+                                + (screenY - glyphs[l].y) * (screenY - glyphs[l].y);
+                    if (dsqr < (glyphs[l].c.radius * glyphs[l].c.radius)) {
+                        p = glyphs[l].c.color;
+                    }
+                } else if (glyphs[l].type == TYPE_RECT) {
+                    // transform point shift
+                    int xshi = screenX - glyphs[l].x;
+                    int yshi = screenY - glyphs[l].y;
+                    // rotate point into box transform
+                    int x2 = (cos_lookup[glyphs[l].r.angle]*(xshi)) / 65535 + 
+                                (sin_lookup[glyphs[l].r.angle] * (yshi)) / 65535 + glyphs[l].x;
+                    int y2 = (-sin_lookup[glyphs[l].r.angle]*(xshi)) / 65535 + 
+                                (cos_lookup[glyphs[l].r.angle] * (yshi)) / 65535 + glyphs[l].y;
+                    if (x2 < (glyphs[l].x + (glyphs[l].r.width / 2)) 
+                            && x2 > (glyphs[l].x - (glyphs[l].r.width/2)) 
+                            && y2 < (glyphs[l].y + (glyphs[l].r.height/2)) 
+                            && y2 > (glyphs[l].y - (glyphs[l].r.height/2))) {
+                        p = glyphs[l].r.color;
+                    }
+                } else if (glyphs[l].type == TYPE_IMAGE) {
+                    // Get multidimensional array from void pointer
+                    typedef const uint16_t aType[glyphs[l].i.height][glyphs[l].i.width];
+                    aType *c = (aType*) glyphs[l].i.array;
+
+                    if (screenX < (glyphs[l].x + (glyphs[l].i.width / 2)) 
+                            && screenX > (glyphs[l].x - (glyphs[l].i.width/2)) 
+                            && screenY < (glyphs[l].y + (glyphs[l].i.height/2)) 
+                            && screenY > (glyphs[l].y - (glyphs[l].i.height/2))) {
+                        uint16_t temp = (*c)[screenY - (glyphs[l].y - (glyphs[l].i.height/2))]
+                                [screenX - (glyphs[l].x - (glyphs[l].i.width/2))];
+                        if (temp == 0xFFFF) {
+                            continue;
+                        } else {
+                            p = temp;
+                        }
+                    }
+                }
+            }
+            
+            // SPI FIFO technique from Paul Stoffregen's ILI9341_t3 library:
+            while(KINETISK_SPI0.SR & 0xC000); // Wait for space in FIFO
+            KINETISK_SPI0.PUSHR = p | SPI_PUSHR_CTAS(1) | SPI_PUSHR_CONT;
+        } // end column
+    } // end scanline
+
+    time = millis() - time;
+
+    //manually end SPI transaction
+    KINETISK_SPI0.SR |= SPI_SR_TCF;         // Clear transfer flag
+    while((KINETISK_SPI0.SR & 0xF000) ||    // Wait for SPI FIFO to drain
+             !(KINETISK_SPI0.SR & SPI_SR_TCF)); // Wait for last bit out
+
+    digitalWrite(select_pins[eye], HIGH);          // Deselect
+    TFT_SPI.endTransaction();
+
+    //TIMEBLOC ---------
+    
+    Serial.println("Loop:");
+    Serial.println(time, DEC);
+}
+
