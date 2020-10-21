@@ -5,14 +5,42 @@
 
 #define SCREEN_WIDTH    128
 #define SCREEN_HEIGHT   128         // Change this to 96 for 1.27" OLED.
-#define DISPLAY_DC      7           // Data/command pin for ALL displays
-#define DISPLAY_RESET   8           // Reset pin for ALL displays
-#define DISPLAY_SEL1    9
-#define DISPLAY_SEL2    10  
-#define SPI_FREQ        24000000    // OLED: 24 MHz on 72 MHz Teensy only (am I overclocking?)
-// #define SPI_FREQ        12000000    // OLED: 24 MHz on 72 MHz Teensy only (am I overclocking?)
 
-/*
+// Screen array info
+typedef struct {
+    int8_t  select;       // pin numbers for each eye's screen select line
+    uint8_t rotation;     // also display rotation.
+} dispInfo_t;
+
+#if defined(ARDUINO_ARCH_SAMD)
+    #define DISPLAY_DC      6           // Data/command pin for ALL displays
+    #define DISPLAY_RESET   10           // Reset pin for ALL displays
+    #define SPI_FREQ        12000000    // OLED: 24 MHz on 72 MHz Teensy only (am I overclocking?)
+
+    dispInfo_t dispInfo[] = {
+        {  9, 0 }, // LEFT EYE display-select and wink pins, no rotation
+    };
+#elif defined(ARDUINO_ARCH_STM32)
+    #define DISPLAY_DC      6           // Data/command pin for ALL displays
+    #define DISPLAY_RESET   10           // Reset pin for ALL displays
+    #define SPI_FREQ        24000000    // OLED: 24 MHz on 72 MHz Teensy only (am I overclocking?)
+
+    dispInfo_t dispInfo[] = {
+        {  9, 0 }, // LEFT EYE display-select and wink pins, no rotation
+    };
+#else // TEENSY
+    #define DISPLAY_DC      7           // Data/command pin for ALL displays
+    #define DISPLAY_RESET   8           // Reset pin for ALL displays
+    #define SPI_FREQ        24000000    // OLED: 24 MHz on 72 MHz Teensy only (am I overclocking?)
+    // #define SPI_FREQ        12000000    // OLED: 24 MHz on 72 MHz Teensy only (am I overclocking?)
+
+    dispInfo_t dispInfo[] = {
+        {  9, 0 }, // LEFT EYE display-select and wink pins, no rotation
+        { 10, 0 }, // RIGHT EYE display-select and wink pins, no rotation
+    };
+#endif
+
+/* (16 bit color examples)
 1111100000000000
 0000011111100000
 0000000000011111
@@ -28,7 +56,7 @@
 #define GREEN           0x07E0
 #define CYAN            0x07FF
 #define MAGENTA         0xF81F
-#define YELLOW          0xFFE0  
+#define YELLOW          0xFFE0
 #define WHITE           0xFFFF
 
 #define TYPE_CIRCLE     0
@@ -70,15 +98,15 @@ typedef struct {
 
 eyeGlyph glyphs[] = {
     {64, 64, TYPE_CIRCLE, { .c = {15, YELLOW} }},
-#if ORISA
-    {32, 32, TYPE_RECT, { .r = {50,50,0, GREY} }},  //CYAN
-    {32, 96, TYPE_RECT, { .r = {50,50,0, GREY} }},   //RED
-    {96, 32, TYPE_RECT, { .r = {50,50,0, GREY} }},  //BLUE
-    {96, 96, TYPE_RECT, { .r = {50,50,0, GREY} }}, //GREEN
+#if ORISA_DYN
+    {32, 32, TYPE_RECT, { .r = {50,50,0, BLACK} }},//GREY} }},  //CYAN
+    {32, 96, TYPE_RECT, { .r = {50,50,0, BLACK} }},//GREY} }},   //RED
+    {96, 32, TYPE_RECT, { .r = {50,50,0, BLACK} }},//GREY} }},  //BLUE
+    {96, 96, TYPE_RECT, { .r = {50,50,0, BLACK} }},//GREY} }}, //GREEN
 #elif JOJO
     {63, 64, TYPE_IMAGE, { .i = {(void*)&image,IMAGE_WIDTH,IMAGE_HEIGHT} }},
 #endif
-    
+
     // {96, 96, true, TYPE_RECT, { .r = {34,34,0, RED} }},
     // {124, 4, TYPE_RECT, { .r = {32,255,0, BLACK} }},
     // {124, 124, TYPE_RECT, { .r = {255,32,0, BLACK} }},
@@ -96,19 +124,19 @@ typedef struct {
     int16_t yoff[4]; //offsets
 } demoStates;
 
-demoStates states[] = {  
+demoStates states[] = {
     //{pupilX, pupilY, pupilR, duration, angle, d1, d2, d3, d4},
-    {  64,     64,     40,     1000000,  0,    {80, 80, 80, 80}, {0,0,0,0}, {0,0,0,0}},        //open
-    {  64,     64,     40,     1000000,  45,   {50, 50, 80, 80}, {(-20),20,0,0}, {0,0,0,0}},    //sarcastic
-    {  64,     64,     30,     1000000,  45,   {50, 50, 50, 50}, {(-20),20,20,-20}, {0,0,0,0}}, //squint
-    {  32,     64,     30,     500000,  45,   {50, 50, 50, 50}, {(-20),20,20,-20}, {0,0,0,0}}, //squintR
-    {  96,     64,     30,     500000,  45,   {50, 50, 50, 50}, {(-20),20,20,-20}, {0,0,0,0}}, //squintL
-    {  64,     64,     30,     500000,  90,    {80, 80, 80, 80}, {0,0,0,0}, {0,0,0,0}},         //open
-    {  64,     64,     35,     1000000,  0,    {45, 45, 45, 45}, {10,22,10,22}, {0,12,0,-12}},  // > - <
-    {  64,     64,     30,     500000,  45,    {80, 80, 80, 80}, {0,0,0,0}, {0,0,0,0}},         //open
-    {  64,     64,     35,     1000000,  90,    {34, 34, 34, 34}, {0,0,0,0}, {-20,-20,0,-20}},        // ^ - ^
-    {  64,     64,     30,     500000,  90,    {80, 80, 80, 80}, {0,0,0,0}, {0,0,0,0}},        //open
-    {  64,     64,     20,     1000000,  0,    {45, 45, 45, 45}, {0,0,0,0}, {0,0,0,0}},         // + - +
+    {  64,     64,     40,     1000000,  0,    {80, 80, 80, 80}, {0,0,0,0}, {0,0,0,0}},        //0open
+    {  64,     64,     40,     1000000,  45,   {50, 50, 80, 80}, {(-20),20,0,0}, {0,0,0,0}},    //1sarcastic
+    {  64,     64,     30,     1000000,  45,   {50, 50, 50, 50}, {(-20),20,20,-20}, {0,0,0,0}}, //2squint
+    {  32,     64,     30,     500000,  45,   {50, 50, 50, 50}, {(-20),20,20,-20}, {0,0,0,0}}, //3squintR
+    {  96,     64,     30,     500000,  45,   {50, 50, 50, 50}, {(-20),20,20,-20}, {0,0,0,0}}, //4squintL
+    {  64,     64,     30,     500000,  90,    {80, 80, 80, 80}, {0,0,0,0}, {0,0,0,0}},         //5open
+    {  64,     64,     35,     1000000,  0,    {45, 45, 45, 45}, {10,22,10,22}, {0,12,0,-12}},  //6 > - <
+    {  64,     64,     30,     500000,  45,    {80, 80, 80, 80}, {0,0,0,0}, {0,0,0,0}},         //7open
+    {  64,     64,     35,     1000000,  90,    {34, 34, 34, 34}, {0,0,0,0}, {-20,-20,0,-20}},        //8 ^ - ^
+    {  64,     64,     30,     500000,  90,    {80, 80, 80, 80}, {0,0,0,0}, {0,0,0,0}},        //9open
+    {  64,     64,     20,     1000000,  0,    {45, 45, 45, 45}, {0,0,0,0}, {0,0,0,0}},         //10 + - +
 
 
     // {  64,     64,     30,     1000000,  45,   {10, 10, 10, 10}, {10,(-10),0,0}},
